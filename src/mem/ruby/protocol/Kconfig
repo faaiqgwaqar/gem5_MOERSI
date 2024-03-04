@@ -26,6 +26,7 @@
 config PROTOCOL
     default "GPU_VIPER" if RUBY_PROTOCOL_GPU_VIPER
     default "MOESI_AMD_Base" if RUBY_PROTOCOL_MOESI_AMD_BASE
+    default "MOERSI_GT_AMD_Base" if RUBY_PROTOCOL_MOERSI_GT_AMD_BASE
     default "MESI_Two_Level" if RUBY_PROTOCOL_MESI_TWO_LEVEL
     default "MESI_Three_Level" if RUBY_PROTOCOL_MESI_THREE_LEVEL
     default "MESI_Three_Level_HTM" if RUBY_PROTOCOL_MESI_THREE_LEVEL_HTM
@@ -33,6 +34,7 @@ config PROTOCOL
     default "MOESI_CMP_directory" if RUBY_PROTOCOL_MOESI_CMP_DIRECTORY
     default "MOESI_CMP_token" if RUBY_PROTOCOL_MOESI_CMP_TOKEN
     default "MOESI_hammer" if RUBY_PROTOCOL_MOESI_HAMMER
+    default "MERSI_GT_Three_Level" if RUBY_PROTOCOL_MERSI_GT_THREE_LEVEL
     default "Garnet_standalone" if RUBY_PROTOCOL_GARNET_STANDALONE
 
 cont_choice "Ruby protocol"
@@ -41,10 +43,14 @@ cont_choice "Ruby protocol"
         depends on BUILD_GPU
     config RUBY_PROTOCOL_MOESI_AMD_BASE
         bool "MOESI AMD base"
+    config RUBY_PROTOCOL_MOERSI_GT_AMD_BASE
+        bool "MOERSI GT AMD base"
     config RUBY_PROTOCOL_MESI_TWO_LEVEL
         bool "MESI two level"
     config RUBY_PROTOCOL_MESI_THREE_LEVEL
         bool "MESI three level"
+    config RUBY_PROTOCOL_MERSI_GT_THREE_LEVEL
+        bool "MERSI three level"
     config RUBY_PROTOCOL_MESI_THREE_LEVEL_HTM
         bool "MESI three level HTM"
     config RUBY_PROTOCOL_MI_EXAMPLE

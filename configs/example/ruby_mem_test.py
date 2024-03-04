@@ -99,6 +99,9 @@ args.l3_assoc = 2
 
 block_size = 64
 
+# if args.num_cpus % 2 != 0:
+#    args.num_cpus += 1;
+
 if args.num_cpus > block_size:
     print(
         "Error: Number of testers %d limited to %d because of false sharing"
@@ -109,6 +112,7 @@ if args.num_cpus > block_size:
 #
 # Currently ruby does not support atomic or uncacheable accesses
 #
+
 cpus = [
     MemTest(
         max_loads=args.maxloads,
@@ -163,6 +167,7 @@ system.ruby.clk_domain = SrcClockDomain(
 #
 system.ruby.randomization = True
 
+print(f"cpus: {len(cpus)}, cpu_ports: {len(system.ruby._cpu_ports)}")
 assert len(cpus) == len(system.ruby._cpu_ports)
 
 for i, cpu in enumerate(cpus):
@@ -191,6 +196,6 @@ m5.ticks.setGlobalFrequency("1ns")
 m5.instantiate()
 
 # simulate until program terminates
-exit_event = m5.simulate(args.abs_max_tick)
+exit_event = m5.simulate(100000000)
 
 print("Exiting @ tick", m5.curTick(), "because", exit_event.getCause())

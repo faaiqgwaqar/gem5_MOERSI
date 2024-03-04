@@ -158,6 +158,17 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     bool isPresent(Addr);
   }
 
+  bool checkResourceAvailable(CoherenceRequestType request_type, Addr addr) {
+    if (request_type == CoherenceRequestType:GETS) {
+      return L2cache.checkResourceAvailable(CacheResourceType:DataArray, addr);
+    } else if (request_type == CoherenceRequestType:GETX) {
+      return L2cache.checkResourceAvailable(CacheResourceType:DataArray, addr);
+    } else {
+      //error("Invalid CoherenceRequestType type in checkResourceAvailable");
+      return true;
+    }
+  }
+
   TBETable TBEs, template="<L2Cache_TBE>", constructor="m_number_of_TBEs";
 
   Tick clockEdge();

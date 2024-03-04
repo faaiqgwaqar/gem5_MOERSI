@@ -34,6 +34,9 @@ machine(MachineType:Directory, "AMD Baseline protocol")
   CacheMemory * L3CacheMemory;
   Cycles response_latency := 5;
   Cycles l3_hit_latency := 50;
+  Cycles l3_refresh_period := 100;
+  Cycles l3_refresh_latency := 20;
+  Cycles l3_refresh_total := 120;
   bool noTCCdir := "False";
   bool CPUonly := "False";
   bool GPUonly := "False";
@@ -48,7 +51,7 @@ machine(MachineType:Directory, "AMD Baseline protocol")
 
   // From the Cores
   MessageBuffer * requestFromCores, network="From", virtual_network="0", vnet_type="request";
-  MessageBuffer * responseFromCores, network="From", virtual_network="5", vnet_type="response";
+  MessageBuffer * responseFromCores, network="From", virtual_network="2", vnet_type="response";
   MessageBuffer * unblockFromCores, network="From", virtual_network="4", vnet_type="unblock";
 
   MessageBuffer * probeToCore, network="To", virtual_network="0", vnet_type="request";
@@ -195,6 +198,9 @@ machine(MachineType:Directory, "AMD Baseline protocol")
   void wakeUpAllBuffers(Addr a);
   void wakeUpBuffers(Addr a);
   Cycles curCycle();
+
+  // VARIABLE DEFINITIONS
+  Cycles lastRefCycle := static_cast(Cycles, "value", 0);
 
   Entry getDirectoryEntry(Addr addr), return_by_pointer="yes" {
     Entry dir_entry := static_cast(Entry, "pointer", directory.lookup(addr));
@@ -620,10 +626,24 @@ machine(MachineType:Directory, "AMD Baseline protocol")
   action(qdr_queueDmaRdReq, "qdr", desc="Read data from memory for DMA") {
     peek(dmaRequestQueue_in, DMARequestMsg) {
       if (L3CacheMemory.isTagPresent(address)) {
-        enqueue(L3TriggerQueue_out, TriggerMsg, l3_hit_latency) {
-          out_msg.addr := address;
-          out_msg.Type := TriggerType:L3Hit;
+        DPRINTF(RubySlicc, "Current Cycle: %d, \n", curCycle());
+        DPRINTF(RubySlicc, "Current Cycle Floored: %d, \n", curCycle() - (curCycle() % (l3_refresh_total)));
+        DPRINTF(RubySlicc, "Last Ref Cycle Floored: %d \n", lastRefCycle);
+        if((curCycle() % (l3_refresh_total) > l3_refresh_period) && static_cast(uint64_t, "value", curCycle() - (curCycle() % (l3_refresh_total))) != static_cast(uint64_t, "value", lastRefCycle)){
+          lastRefCycle := static_cast(Cycles, "value", curCycle() - (curCycle() % (l3_refresh_total)));
+          enqueue(L3TriggerQueue_out, TriggerMsg, l3_hit_latency + ((curCycle() % (l3_refresh_total)) - l3_refresh_period)) {
+            DPRINTF(RubySlicc, "Additional Latency: %d\n", l3_hit_latency + ((curCycle() % (l3_refresh_total)) - l3_refresh_period));
+            out_msg.addr := address;
+            out_msg.Type := TriggerType:L3Hit;
+          }
+        } else {
+          enqueue(L3TriggerQueue_out, TriggerMsg, l3_hit_latency) {
+            DPRINTF(RubySlicc, "Normal Latency: %d\n", l3_hit_latency);
+            out_msg.addr := address;
+            out_msg.Type := TriggerType:L3Hit;
+          }
         }
+
         CacheEntry entry := static_cast(CacheEntry, "pointer", L3CacheMemory.lookup(address));
 
         // tbe.DataBlk may have partial data (e.g., for DMA writes). Make sure
@@ -649,10 +669,24 @@ machine(MachineType:Directory, "AMD Baseline protocol")
   action(l_queueMemRdReq, "lr", desc="Read data from memory") {
     peek(requestNetwork_in, CPURequestMsg) {
       if (L3CacheMemory.isTagPresent(address)) {
-        enqueue(L3TriggerQueue_out, TriggerMsg, l3_hit_latency) {
-          out_msg.addr := address;
-          out_msg.Type := TriggerType:L3Hit;
-          DPRINTF(RubySlicc, "%s\n", out_msg);
+        DPRINTF(RubySlicc, "Current Cycle: %d, \n", curCycle());
+        DPRINTF(RubySlicc, "Current Cycle Floored: %d, \n", curCycle() - (curCycle() % (l3_refresh_total)));
+        DPRINTF(RubySlicc, "Last Ref Cycle Floored: %d \n", lastRefCycle);
+        if((curCycle() % (l3_refresh_total) > l3_refresh_period) && static_cast(uint64_t, "value", curCycle() - (curCycle() % (l3_refresh_total))) != static_cast(uint64_t, "value", lastRefCycle)){
+          lastRefCycle := static_cast(Cycles, "value", curCycle() - (curCycle() % (l3_refresh_total)));
+          enqueue(L3TriggerQueue_out, TriggerMsg, l3_hit_latency + ((curCycle() % (l3_refresh_total)) - l3_refresh_period)) {
+            DPRINTF(RubySlicc, "Additional Latency: %d\n", l3_hit_latency + ((curCycle() % (l3_refresh_total)) - l3_refresh_period));
+            out_msg.addr := address;
+            out_msg.Type := TriggerType:L3Hit;
+            DPRINTF(RubySlicc, "%s\n", out_msg);
+          }
+        } else {
+          enqueue(L3TriggerQueue_out, TriggerMsg, l3_hit_latency) {
+            DPRINTF(RubySlicc, "Normal Latency: %d\n", l3_hit_latency);
+            out_msg.addr := address;
+            out_msg.Type := TriggerType:L3Hit;
+            DPRINTF(RubySlicc, "%s\n", out_msg);
+          }
         }
         CacheEntry entry := static_cast(CacheEntry, "pointer", L3CacheMemory.lookup(address));
         if (tbe.Dirty == false) {
@@ -1096,7 +1130,7 @@ machine(MachineType:Directory, "AMD Baseline protocol")
         out_msg.Sender := machineID;
         out_msg.MessageSize := MessageSizeType:Writeback_Data;
         out_msg.DataBlk := tbe.DataBlk;
-        DPRINTF(ProtocolTrace, "%s\n", out_msg);
+        //DPRINTF(ProtocolTrace, "%s\n", out_msg);
       }
     }
   }

@@ -795,6 +795,12 @@ CacheMemory::profileDemandMiss()
 }
 
 void
+CacheMemory::profileMemoryWrite()
+{
+    cacheMemoryStats.numDataArrayWrites++;
+}
+
+void
 CacheMemory::profilePrefetchHit()
 {
     cacheMemoryStats.m_prefetch_hits++;

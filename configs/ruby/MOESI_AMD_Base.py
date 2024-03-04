@@ -29,7 +29,11 @@
 
 import math
 
-from common import FileSystemConfig
+from common import (
+    FileSystemConfig,
+    MemConfig,
+    ObjectList,
+)
 
 import m5
 from m5.defines import buildEnv
@@ -126,6 +130,8 @@ class CPCntrl(CorePair_Controller, CntrlBase):
         self.sequencer1.coreid = 1
         self.sequencer1.is_cpu_sequencer = True
 
+        # self.sequencer.mem_request_port = self.memory_out_port
+
         # Defines icache/dcache hit latency
         self.mandatory_queue_latency = 2
 
@@ -191,6 +197,7 @@ class DirCntrl(Directory_Controller, CntrlBase):
     def create(self, options, dir_ranges, ruby_system, system):
         self.version = self.versionCount()
 
+        self.L2isWB = False
         self.response_latency = 30
 
         self.addr_ranges = dir_ranges
@@ -259,6 +266,7 @@ def create_system(
     l1_cntrl_nodes = []
     l3_cntrl_nodes = []
     dir_cntrl_nodes = []
+    mem_ctrls = []
 
     control_count = 0
 
@@ -282,6 +290,7 @@ def create_system(
         numa_bit = block_size_bits + dir_bits - 1
 
     for i in range(options.num_dirs):
+        # print("num_dirs: {}".format(options.num_dirs))
         dir_ranges = []
         for r in system.mem_ranges:
             addr_range = m5.objects.AddrRange(
@@ -315,6 +324,12 @@ def create_system(
         dir_cntrl.triggerQueue = MessageBuffer(ordered=True)
         dir_cntrl.L3triggerQueue = MessageBuffer(ordered=True)
 
+        dir_cntrl.requestFromDMA = MessageBuffer(ordered=True)
+        dir_cntrl.requestFromDMA.in_port = ruby_system.network.out_port
+
+        dir_cntrl.responseToDMA = MessageBuffer()
+        dir_cntrl.responseToDMA.out_port = ruby_system.network.in_port
+
         dir_cntrl.requestToMemory = MessageBuffer()
         dir_cntrl.responseFromMemory = MessageBuffer()
 
@@ -327,11 +342,14 @@ def create_system(
     # level config files, such as the ruby_random_tester, will get confused if
     # the number of cpus does not equal the number of sequencers.  Thus make
     # sure that an even number of cpus is specified.
+    # if (options.num_cpus % 2) != 0:
+    #    options.num_cpus += 1
     assert (options.num_cpus % 2) == 0
 
     # For an odd number of CPUs, still create the right number of controllers
     cpuCluster = Cluster(extBW=512, intBW=512)  # 1 TB/s
     for i in range((options.num_cpus + 1) // 2):
+        # print("num_cpus_cntrl: {}".format((options.num_cpus + 1) // 2))
         cp_cntrl = CPCntrl()
         cp_cntrl.create(options, ruby_system, system)
 
@@ -358,7 +376,27 @@ def create_system(
         cp_cntrl.responseToCore.in_port = ruby_system.network.out_port
 
         cp_cntrl.mandatoryQueue = MessageBuffer()
+        # cp_cntrl.mandatoryQueue.in_port = ruby_system.network.out_port
+
         cp_cntrl.triggerQueue = MessageBuffer(ordered=True)
+        # cp_cntrl.triggerQueue.in_port = ruby_system.network.out_port
+        # cp_cntrl.triggerQueue.out_port = ruby_system.network.in_port
+
+        # dram = ObjectList.mem_list.get(options.mem_type)
+        # dram_intf = MemConfig.create_mem_intf(
+        #    dram,
+        #    options.mem_size,
+        #    i,
+        #    int(math.log(options.num_dirs, 2)),
+        #    options.cacheline_size,
+        #    0,
+        # )
+        #
+        # mem_ctrl = dram_intf
+        # port = RequestPort("Port to the memory system")
+        # port = cp_cntrl.memory_out_port
+        # mem_ctrl.dram.enable_dram_powerdown = False
+        # mem_ctrls.append(mem_ctrl)
 
         cpuCluster.add(cp_cntrl)
 

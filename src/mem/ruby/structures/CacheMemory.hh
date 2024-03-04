@@ -251,6 +251,7 @@ class CacheMemory : public SimObject
       // each time they are called
       void profileDemandHit();
       void profileDemandMiss();
+      void profileMemoryWrite();
       void profilePrefetchHit();
       void profilePrefetchMiss();
 };

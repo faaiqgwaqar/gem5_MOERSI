@@ -694,7 +694,7 @@ machine(MachineType:CorePair, "CP-like Core Coherence")
       out_msg.Type := CoherenceRequestType:RdBlk;
       out_msg.Requestor := machineID;
       out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
-      DPRINTF(RubySlicc,"%s\n",out_msg.Destination);
+      //DPRINTF(RubySlicc,"%s\n",out_msg.Destination);
       out_msg.MessageSize := MessageSizeType:Request_Control;
       out_msg.InitialRequestTime := curCycle();
     }
@@ -865,7 +865,7 @@ machine(MachineType:CorePair, "CP-like Core Coherence")
       assert((machineIDToMachineType(in_msg.Sender) == MachineType:Directory) ||
               (machineIDToMachineType(in_msg.Sender) == MachineType:L3Cache));
       Entry l2entry := getCacheEntry(address); // Used for functional accesses
-      DPRINTF(ProtocolTrace, "CP Load Done 0 -- address %s, data: %s\n", address, l2entry.DataBlk);
+      //DPRINTF(ProtocolTrace, "CP Load Done 0 -- address %s, data: %s\n", address, l2entry.DataBlk);
       // L2 supplies data (functional accesses only look in L2, ok because L1
       //                   writes through to L2)
       sequencer.readCallback(address,
@@ -940,7 +940,7 @@ machine(MachineType:CorePair, "CP-like Core Coherence")
     cache_entry.Dirty := true;
     entry.DataBlk := cache_entry.DataBlk;
     entry.Dirty := true;
-    DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
+    //DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
   }
 
   action(s1_storeDone, "s1", desc="Cluster 1 store done") {
@@ -954,7 +954,7 @@ machine(MachineType:CorePair, "CP-like Core Coherence")
     cache_entry.Dirty := true;
     entry.Dirty := true;
     entry.DataBlk := cache_entry.DataBlk;
-    DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
+    //DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
   }
 
   action(xs0_storeDone, "xs0", desc="Cluster 0 store done") {
@@ -974,7 +974,7 @@ machine(MachineType:CorePair, "CP-like Core Coherence")
       cache_entry.Dirty := true;
       entry.Dirty := true;
       entry.DataBlk := cache_entry.DataBlk;
-      DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
+      //DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
     }
   }
 
@@ -995,20 +995,20 @@ machine(MachineType:CorePair, "CP-like Core Coherence")
       cache_entry.Dirty := true;
       entry.Dirty := true;
       entry.DataBlk := cache_entry.DataBlk;
-      DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
+      //DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
     }
   }
 
   action(forward_eviction_to_cpu0, "fec0", desc="sends eviction information to processor0") {
     if (send_evictions) {
-      DPRINTF(RubySlicc, "Sending invalidation for %s to the CPU\n", address);
+      //DPRINTF(RubySlicc, "Sending invalidation for %s to the CPU\n", address);
       sequencer.evictionCallback(address);
     }
   }
 
   action(forward_eviction_to_cpu1, "fec1", desc="sends eviction information to processor1") {
     if (send_evictions) {
-      DPRINTF(RubySlicc, "Sending invalidation for %s to the CPU\n", address);
+      //DPRINTF(RubySlicc, "Sending invalidation for %s to the CPU\n", address);
       sequencer1.evictionCallback(address);
     }
   }
@@ -1081,7 +1081,7 @@ machine(MachineType:CorePair, "CP-like Core Coherence")
       Entry entry := getL1CacheEntry(address, 0);
       assert(is_valid(entry));
       assert(is_valid(cache_entry));
-      DPRINTF(ProtocolTrace, "CP writeD0: address %s, data: %s\n", address, in_msg.DataBlk);
+      //DPRINTF(ProtocolTrace, "CP writeD0: address %s, data: %s\n", address, in_msg.DataBlk);
       entry.DataBlk := in_msg.DataBlk;
       entry.Dirty := in_msg.Dirty;
       cache_entry.DataBlk := in_msg.DataBlk;
@@ -1109,7 +1109,7 @@ machine(MachineType:CorePair, "CP-like Core Coherence")
         out_msg.Sender := machineID;
         out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
         out_msg.MessageSize := MessageSizeType:Response_Control;
-        DPRINTF(RubySlicc, "%s\n", out_msg);
+        //DPRINTF(RubySlicc, "%s\n", out_msg);
       }
     }
   }
@@ -1130,7 +1130,7 @@ machine(MachineType:CorePair, "CP-like Core Coherence")
         }
         out_msg.State := CoherenceState:Shared; // faux info
         out_msg.MessageSize := MessageSizeType:Writeback_Data;
-        DPRINTF(RubySlicc, "%s\n", out_msg);
+        //DPRINTF(RubySlicc, "%s\n", out_msg);
       }
     }
   }
@@ -1260,7 +1260,7 @@ machine(MachineType:CorePair, "CP-like Core Coherence")
       out_msg.addr := address;
       out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
       out_msg.MessageSize := MessageSizeType:Unblock_Control;
-      DPRINTF(RubySlicc, "%s\n", out_msg);
+      //DPRINTF(RubySlicc, "%s\n", out_msg);
     }
   }
 
