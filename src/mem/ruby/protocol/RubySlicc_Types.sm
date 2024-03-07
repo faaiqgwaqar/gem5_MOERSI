@@ -219,12 +219,14 @@ structure (CacheMemory, external = "yes") {
   void setMRU(Addr, int);
   void setMRU(AbstractCacheEntry);
   void recordRequestType(CacheRequestType, Addr);
+  void recordRequestTypeSpecf(CacheRequestType, Addr, Cycles);
   bool checkResourceAvailable(CacheResourceType, Addr);
 
   // hardware transactional memory
   void htmCommitTransaction();
   void htmAbortTransaction();
 
+  int getRefreshStartPoint(CacheResourceType, Addr);
   int getCacheSize();
   int getNumBlocks();
   Addr getAddressAtIdx(int);

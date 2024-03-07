@@ -38,21 +38,30 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
+machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
  : CacheMemory * L2cache;
-   Cycles l2_request_latency := 1;
-   Cycles l2_response_latency := 1;
+   Cycles l2_request_latency := 2;
+   Cycles l2_response_latency := 2;
    Cycles to_l1_latency := 1;
 
-   // New Design Parameters
+  // New Design Parameters
    int l2_refresh_enabled := 0;
-   int num_banks := 1;
+   int l2_tag_refresh_enabled := 0;
+   int num_data_banks := 1;
+   int num_tag_banks := 1;
    Cycles l2_refresh_period := 1;
    Cycles l2_refresh_latency := 1;
    Cycles l2_refresh_total := 1;
    Cycles l2_data_hit_latency := 2;
    Cycles l2_data_miss_latency := 2;
    Cycles l2_data_write_latency := 2;
+   Cycles tag_read_latency := 2;
+   Cycles data_read_latency := 5;
+   Cycles tag_write_latency := 2;
+   Cycles data_write_latency := 5;
+   Cycles l2_tag_refresh_period := 1;
+   Cycles l2_tag_refresh_latency := 1;
+   Cycles l2_tag_refresh_total := 1;
 
   // Message Queues
   // From local bank of L2 cache TO the network
@@ -118,6 +127,10 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     L1_PUTX,                 desc="L1 replacing data";
     L1_PUTX_old,             desc="L1 replacing data, but no longer sharer";
 
+    // New busy schemes
+    L1_STALL_DATA,           desc="L1 request has data bank still busy so recycle";
+    MEM_STALL_DATA,           desc="MEM request has data bank still busy so recycle";
+
     // events initiated by this L2
     L2_Replacement,     desc="L2 Replacement", format="!r";
     L2_Replacement_clean,     desc="L2 Replacement, but data is clean", format="!r";
@@ -168,25 +181,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     bool isPresent(Addr);
   }
 
-  //structure(BankStatusTable, desc="Current Status of Bank n") {
-  //  Cycles lastAccessCycle,   desc="Cycle during which the last access occured";
-  //  Cycles lastAccessLatency, desc="Operation latency of the last access";
-  //  Cycles firstRefreshCycle, desc="When does this bank begin refreshes";
-  //}
-
   TBETable TBEs, template="<L2Cache_TBE>", constructor="m_number_of_TBEs";
-  //BankStatus BankStati, template="<L2Cache_BankStatus>", constructor="m_number_of_banks";
-  //BankStati.allocate(numBanks);
-
-  //BankStati[0].lastAccessCycle := static_cast(Cycles, "value", 0);
-
-  // VARIABLE DEFINITIONS
-  Cycles lastRefCycle_L2ResponseNetwork := static_cast(Cycles, "value", 0);
-  Cycles lastRefCycle_L1RequestL2Network := static_cast(Cycles, "value", 0);
-  Cycles lastRefCycle_DirRequestL2Network := static_cast(Cycles, "value", 0);
-
-  Cycles lastAccessCycle := static_cast(Cycles, "value", 0);
-  Cycles lastAccessLatency := static_cast(Cycles, "value", 0);
 
   Tick clockEdge();
   Tick cyclesToTicks(Cycles c);
@@ -200,6 +195,10 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
   void wakeUpBuffers(Addr a);
   void profileMsgDelay(int virtualNetworkType, Cycles c);
   MachineID mapAddressToMachine(Addr addr, MachineType mtype);
+
+  Cycles lastRefCycle_L2ResponseNetwork := static_cast(Cycles, "value", 0);
+  Cycles lastRefCycle_L1RequestL2Network := static_cast(Cycles, "value", 0);
+  Cycles lastRefCycle_DirRequestL2Network := static_cast(Cycles, "value", 0);
 
   // inclusive cache, returns L2 entries only
   Entry getCacheEntry(Addr addr), return_by_pointer="yes" {
@@ -295,11 +294,19 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     (static_cast(uint64_t, "value", currentCycle - (currentCycle % (l2_refresh_total))) != static_cast(uint64_t, "value", 0));
   }
 
+  bool dataBankCheckRefresh(Cycles currentCycle){
+    return (currentCycle % (l2_refresh_total) > l2_refresh_period);
+  }
+
+  bool tagBankCheckRefresh(Cycles currentCycle){
+    return (currentCycle % (l2_tag_refresh_total) > l2_tag_refresh_period);
+  }
+
   Cycles recordLastFlooredCycle(Cycles currentCycle){
     return static_cast(Cycles, "value", currentCycle - (currentCycle % (l2_refresh_total)));
   }
 
-  Cycles additionalRefreshLatency(Cycles currentCycle){
+  Cycles additionalDataRefreshLatency(Cycles currentCycle){
     if(l2_refresh_enabled != 0){
       return static_cast(Cycles, "value", ((currentCycle % (l2_refresh_total)) - l2_refresh_period));
     } else {
@@ -307,44 +314,99 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     }
   }
 
-  Cycles additionalAccessLatency(Cycles currentCycle, Cycles newLatency){
-    Cycles additionalLatency;
-    if(currentCycle < (lastAccessLatency + lastAccessCycle)){
-      additionalLatency := static_cast(Cycles, "value", (lastAccessLatency + lastAccessCycle) - currentCycle);
-      lastAccessCycle := lastAccessCycle + lastAccessLatency;
-      lastAccessLatency := newLatency;
+  Cycles additionalTagRefreshLatency(Cycles currentCycle){
+    if(l2_tag_refresh_enabled != 0){
+      return static_cast(Cycles, "value", ((currentCycle % (l2_tag_refresh_total)) - l2_tag_refresh_period));
     } else {
-      additionalLatency := static_cast(Cycles, "value", 0);
-    }
-    return additionalLatency;
-  }
-
-  bool checkResourceAvailable(CoherenceRequestType request_type, Addr addr) {
-    if (request_type == CoherenceRequestType:GETS) {
-      return L2cache.checkResourceAvailable(CacheResourceType:DataArray, addr);
-    } else {
-      error("Invalid CoherenceRequestType type in checkResourceAvailable");
-      return true;
+      return static_cast(Cycles, "value", 0);
     }
   }
 
   Event L1Cache_request_type_to_event(CoherenceRequestType type, Addr addr,
-                                      MachineID requestor, Entry cache_entry) {
+                                      MachineID requestor, Entry cache_entry, TBE tbe) {
     if(type == CoherenceRequestType:GETS) {
+      if(getState(tbe, cache_entry, addr) == State:SS || getState(tbe, cache_entry, addr) == State:M){
+        if (L2cache.checkResourceAvailable(CacheResourceType:DataArray, addr) && L2cache.checkResourceAvailable(CacheResourceType:TagArray, addr)) {
+          return Event:L1_GETS;
+        } else {
+          return Event:L1_STALL_DATA;
+        }
+      } else if (getState(tbe, cache_entry, addr) == State:NP || getState(tbe, cache_entry, addr) == State:MT || getState(tbe, cache_entry, addr) == State:IS || getState(tbe, cache_entry, addr) == State:ISS){
+        if (L2cache.checkResourceAvailable(CacheResourceType:TagArray, addr)) {
+          return Event:L1_GETS;
+        } else {
+          return Event:L1_STALL_DATA;
+        }
+      } else {
+        return Event:L1_GETS;
+      }
       return Event:L1_GETS;
     } else if(type == CoherenceRequestType:GET_INSTR) {
+      if(getState(tbe, cache_entry, addr) == State:SS || getState(tbe, cache_entry, addr) == State:M){
+        if (L2cache.checkResourceAvailable(CacheResourceType:DataArray, addr) && L2cache.checkResourceAvailable(CacheResourceType:TagArray, addr)) {
+          return Event:L1_GET_INSTR;
+        } else {
+          return Event:L1_STALL_DATA;
+        }
+      } else if (getState(tbe, cache_entry, addr) == State:NP || getState(tbe, cache_entry, addr) == State:MT || getState(tbe, cache_entry, addr) == State:IS || getState(tbe, cache_entry, addr) == State:ISS){
+        if (L2cache.checkResourceAvailable(CacheResourceType:TagArray, addr)) {
+          return Event:L1_GET_INSTR;
+        } else {
+          return Event:L1_STALL_DATA;
+        }
+      } else {
+        return Event:L1_GET_INSTR;
+      }
       return Event:L1_GET_INSTR;
     } else if (type == CoherenceRequestType:GETX) {
+      if(getState(tbe, cache_entry, addr) == State:SS || getState(tbe, cache_entry, addr) == State:M){
+        if (L2cache.checkResourceAvailable(CacheResourceType:DataArray, addr) && L2cache.checkResourceAvailable(CacheResourceType:TagArray, addr)) {
+          return Event:L1_GETX;
+        } else {
+          return Event:L1_STALL_DATA;
+        }
+      } else if (getState(tbe, cache_entry, addr) == State:NP || getState(tbe, cache_entry, addr) == State:MT){
+        if (L2cache.checkResourceAvailable(CacheResourceType:TagArray, addr)) {
+          return Event:L1_GETX;
+        } else {
+          return Event:L1_STALL_DATA;
+        }
+      } else {
+        return Event:L1_GETX;
+      }
       return Event:L1_GETX;
     } else if (type == CoherenceRequestType:UPGRADE) {
       if ( is_valid(cache_entry) && cache_entry.Sharers.isElement(requestor) ) {
         return Event:L1_UPGRADE;
       } else {
+        if(getState(tbe, cache_entry, addr) == State:SS || getState(tbe, cache_entry, addr) == State:M){
+          if (L2cache.checkResourceAvailable(CacheResourceType:DataArray, addr) && L2cache.checkResourceAvailable(CacheResourceType:TagArray, addr)) {
+            return Event:L1_GETX;
+          } else {
+            return Event:L1_STALL_DATA;
+          }
+        } else if (getState(tbe, cache_entry, addr) == State:NP || getState(tbe, cache_entry, addr) == State:MT){
+          if (L2cache.checkResourceAvailable(CacheResourceType:TagArray, addr)) {
+            return Event:L1_GETX;
+          } else {
+            return Event:L1_STALL_DATA;
+          }
+        } else {
+          return Event:L1_GETX;
+        }
         return Event:L1_GETX;
       }
     } else if (type == CoherenceRequestType:PUTX) {
       if (isSharer(addr, requestor, cache_entry)) {
-        return Event:L1_PUTX;
+        if(getState(tbe, cache_entry, addr) == State:MT){
+          if (L2cache.checkResourceAvailable(CacheResourceType:DataArray, addr) && L2cache.checkResourceAvailable(CacheResourceType:TagArray, addr)) {
+            return Event:L1_PUTX;
+          } else {
+            return Event:L1_STALL_DATA;
+          }
+        } else{
+          return Event:L1_PUTX;
+        }
       } else {
         return Event:L1_PUTX_old;
       }
@@ -402,10 +464,22 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
 
         if(machineIDToMachineType(in_msg.Sender) == MachineType:L1Cache) {
           if(in_msg.Type == CoherenceResponseType:DATA) {
-            if (in_msg.Dirty) {
-              trigger(Event:WB_Data, in_msg.addr, cache_entry, tbe);
+            if(getState(tbe, cache_entry, in_msg.addr) == State:MT_IB || getState(tbe, cache_entry, in_msg.addr) == State:MT_IIB){
+              if (L2cache.checkResourceAvailable(CacheResourceType:DataArray, in_msg.addr) && L2cache.checkResourceAvailable(CacheResourceType:TagArray, in_msg.addr)) {
+                if (in_msg.Dirty) {
+                  trigger(Event:WB_Data, in_msg.addr, cache_entry, tbe);
+                } else {
+                  trigger(Event:WB_Data_clean, in_msg.addr, cache_entry, tbe);
+                }
+              } else {
+                trigger(Event:L1_STALL_DATA, in_msg.addr, cache_entry, tbe);
+              }
             } else {
-              trigger(Event:WB_Data_clean, in_msg.addr, cache_entry, tbe);
+              if (in_msg.Dirty) {
+                trigger(Event:WB_Data, in_msg.addr, cache_entry, tbe);
+              } else {
+                trigger(Event:WB_Data_clean, in_msg.addr, cache_entry, tbe);
+              }
             }
           } else if (in_msg.Type == CoherenceResponseType:ACK) {
             if ((getPendingAcks(tbe) - in_msg.AckCount) == 0) {
@@ -419,7 +493,11 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
 
         } else { // external message
           if(in_msg.Type == CoherenceResponseType:MEMORY_DATA) {
-              trigger(Event:Mem_Data, in_msg.addr, cache_entry, tbe);
+              if(L2cache.checkResourceAvailable(CacheResourceType:DataArray, in_msg.addr) && L2cache.checkResourceAvailable(CacheResourceType:TagArray, in_msg.addr)){
+                trigger(Event:Mem_Data, in_msg.addr, cache_entry, tbe);
+              } else {
+                trigger(Event:MEM_STALL_DATA, in_msg.addr, cache_entry, tbe);
+              }
           } else if(in_msg.Type == CoherenceResponseType:MEMORY_ACK) {
               trigger(Event:Mem_Ack, in_msg.addr, cache_entry, tbe);
           } else if(in_msg.Type == CoherenceResponseType:INV) {
@@ -449,13 +527,13 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
         if (is_valid(cache_entry)) {
           // The L2 contains the block, so proceeded with handling the request
           trigger(L1Cache_request_type_to_event(in_msg.Type, in_msg.addr,
-                                                in_msg.Requestor, cache_entry),
+                                                in_msg.Requestor, cache_entry, tbe),
                   in_msg.addr, cache_entry, tbe);
         } else {
           if (L2cache.cacheAvail(in_msg.addr)) {
             // L2 does't have the line, but we have space for it in the L2
             trigger(L1Cache_request_type_to_event(in_msg.Type, in_msg.addr,
-                                                  in_msg.Requestor, cache_entry),
+                                                  in_msg.Requestor, cache_entry, tbe),
                     in_msg.addr, cache_entry, tbe);
           } else {
             // No room in the L2, so we need to make room before handling the request
@@ -480,7 +558,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     peek(L1RequestL2Network_in, RequestMsg) {
       if(bankCurrentlyInRefresh(curCycle(), lastRefCycle_DirRequestL2Network)){
         lastRefCycle_DirRequestL2Network := recordLastFlooredCycle(curCycle());
-        enqueue(DirRequestL2Network_out, RequestMsg, l2_request_latency + l2_data_miss_latency + additionalRefreshLatency(curCycle()) + additionalAccessLatency(curCycle(), l2_data_miss_latency)) {
+        enqueue(DirRequestL2Network_out, RequestMsg, l2_request_latency + l2_data_miss_latency + additionalDataRefreshLatency(curCycle())) {
           out_msg.addr := address;
           out_msg.Type := CoherenceRequestType:GETS;
           out_msg.Requestor := machineID;
@@ -507,7 +585,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     peek(L1RequestL2Network_in, RequestMsg) {
       if(bankCurrentlyInRefresh(curCycle(), lastRefCycle_L1RequestL2Network)){
         lastRefCycle_L1RequestL2Network := recordLastFlooredCycle(curCycle());
-        enqueue(L1RequestL2Network_out, RequestMsg, to_l1_latency + l2_data_miss_latency + additionalRefreshLatency(curCycle()) + additionalAccessLatency(curCycle(), l2_data_miss_latency)) {
+        enqueue(L1RequestL2Network_out, RequestMsg, to_l1_latency + l2_data_miss_latency + additionalDataRefreshLatency(curCycle())) {
           assert(is_valid(cache_entry));
           out_msg.addr := address;
           out_msg.Type := in_msg.Type;
@@ -568,7 +646,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     peek(L1RequestL2Network_in, RequestMsg) {
       if(bankCurrentlyInRefresh(curCycle(), lastRefCycle_L2ResponseNetwork)){
         lastRefCycle_L2ResponseNetwork := recordLastFlooredCycle(curCycle());
-        enqueue(responseL2Network_out, ResponseMsg, l2_response_latency + l2_data_hit_latency + additionalRefreshLatency(curCycle()) + additionalAccessLatency(curCycle(), l2_data_hit_latency)) {
+        enqueue(responseL2Network_out, ResponseMsg, l2_response_latency + l2_data_hit_latency + additionalDataRefreshLatency(curCycle())) {
           assert(is_valid(cache_entry));
           out_msg.addr := address;
           out_msg.Type := CoherenceResponseType:DATA;
@@ -605,7 +683,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     peek(L1RequestL2Network_in, RequestMsg) {
       if(bankCurrentlyInRefresh(curCycle(), lastRefCycle_L2ResponseNetwork)){
         lastRefCycle_L2ResponseNetwork := recordLastFlooredCycle(curCycle());
-        enqueue(responseL2Network_out, ResponseMsg, l2_response_latency + l2_data_hit_latency + additionalRefreshLatency(curCycle()) + additionalAccessLatency(curCycle(), l2_data_hit_latency)) {
+        enqueue(responseL2Network_out, ResponseMsg, l2_response_latency + l2_data_hit_latency + additionalDataRefreshLatency(curCycle())) {
           assert(is_valid(cache_entry));
           out_msg.addr := address;
           out_msg.Type := CoherenceResponseType:DATA_EXCLUSIVE;
@@ -642,7 +720,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     peek(L1RequestL2Network_in, RequestMsg) {
       if(bankCurrentlyInRefresh(curCycle(), lastRefCycle_L2ResponseNetwork)){
         lastRefCycle_L2ResponseNetwork := recordLastFlooredCycle(curCycle());
-        enqueue(responseL2Network_out, ResponseMsg, l2_response_latency + l2_data_hit_latency + additionalRefreshLatency(curCycle()) + additionalAccessLatency(curCycle(), l2_data_hit_latency)) {
+        enqueue(responseL2Network_out, ResponseMsg, l2_response_latency + l2_data_hit_latency + additionalDataRefreshLatency(curCycle())) {
           assert(is_valid(cache_entry));
           out_msg.addr := address;
           out_msg.Type := CoherenceResponseType:DATA;
@@ -672,7 +750,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     assert(tbe.L1_GetS_IDs.count() > 0);
     if(bankCurrentlyInRefresh(curCycle(), lastRefCycle_L2ResponseNetwork)){
       lastRefCycle_L2ResponseNetwork := recordLastFlooredCycle(curCycle());
-      enqueue(responseL2Network_out, ResponseMsg, to_l1_latency + l2_data_write_latency + additionalRefreshLatency(curCycle()) + additionalAccessLatency(curCycle(), l2_data_write_latency)) {
+      enqueue(responseL2Network_out, ResponseMsg, to_l1_latency + l2_data_write_latency + additionalDataRefreshLatency(curCycle())) {
         assert(is_valid(cache_entry));
         out_msg.addr := address;
         out_msg.Type := CoherenceResponseType:DATA;
@@ -699,7 +777,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     assert(tbe.L1_GetS_IDs.count() == 1);
     if(bankCurrentlyInRefresh(curCycle(), lastRefCycle_L2ResponseNetwork)){
       lastRefCycle_L2ResponseNetwork := recordLastFlooredCycle(curCycle());
-      enqueue(responseL2Network_out, ResponseMsg, to_l1_latency + l2_data_write_latency + additionalRefreshLatency(curCycle()) + additionalAccessLatency(curCycle(), l2_data_write_latency)) {
+      enqueue(responseL2Network_out, ResponseMsg, to_l1_latency + l2_data_write_latency + additionalDataRefreshLatency(curCycle())) {
         assert(is_valid(cache_entry));
         out_msg.addr := address;
         out_msg.Type := CoherenceResponseType:DATA_EXCLUSIVE;
@@ -724,7 +802,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
   action(ee_sendDataToGetXRequestor, "ee", desc="Send data from cache to GetX ID") {
     if(bankCurrentlyInRefresh(curCycle(), lastRefCycle_L2ResponseNetwork)){
       lastRefCycle_L2ResponseNetwork := recordLastFlooredCycle(curCycle());
-      enqueue(responseL2Network_out, ResponseMsg, to_l1_latency + l2_data_write_latency + additionalRefreshLatency(curCycle()) + additionalAccessLatency(curCycle(), l2_data_write_latency)) {
+      enqueue(responseL2Network_out, ResponseMsg, to_l1_latency + l2_data_write_latency + additionalDataRefreshLatency(curCycle())) {
         assert(is_valid(tbe));
         assert(is_valid(cache_entry));
         out_msg.addr := address;
@@ -895,7 +973,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     peek(L1RequestL2Network_in, RequestMsg) {
       if(bankCurrentlyInRefresh(curCycle(), lastRefCycle_L2ResponseNetwork)){
         lastRefCycle_L2ResponseNetwork := recordLastFlooredCycle(curCycle());
-        enqueue(responseL2Network_out, ResponseMsg, to_l1_latency + l2_data_write_latency + additionalRefreshLatency(curCycle()) + additionalAccessLatency(curCycle(), l2_data_write_latency)) {
+        enqueue(responseL2Network_out, ResponseMsg, to_l1_latency + l2_data_write_latency + additionalDataRefreshLatency(curCycle())) {
           out_msg.addr := address;
           out_msg.Type := CoherenceResponseType:WB_ACK;
           out_msg.Sender := machineID;
@@ -910,18 +988,6 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
           out_msg.Destination.add(in_msg.Requestor);
           out_msg.MessageSize := MessageSizeType:Response_Control;
         }
-      }
-    }
-  }
-
-  action(ti_sendWBAck, "ti", desc="Send writeback ACK in Inval. state") {
-    peek(L1RequestL2Network_in, RequestMsg) {
-      enqueue(responseL2Network_out, ResponseMsg, to_l1_latency) {
-        out_msg.addr := address;
-        out_msg.Type := CoherenceResponseType:WB_ACK;
-        out_msg.Sender := machineID;
-        out_msg.Destination.add(in_msg.Requestor);
-        out_msg.MessageSize := MessageSizeType:Response_Control;
       }
     }
   }
@@ -947,10 +1013,6 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
 
   action(uu_profileHit, "\uh", desc="Profile the demand hit") {
     L2cache.profileDemandHit();
-  }
-
-  action(uu_profileWrite, "\uw", desc="Profile the memory write") {
-    L2cache.profileMemoryWrite();
   }
 
   action(nn_addSharer, "\n", desc="Add L1 sharer to list") {
@@ -1004,6 +1066,10 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     stall_and_wait(L1RequestL2Network_in, address);
   }
 
+  action(zr_recycleL1RequestQueue, "zr", desc="recycle, really, the L1 request queue") {
+    L1RequestL2Network_in.recycle(clockEdge(), cyclesToTicks(recycle_latency));
+  }
+
   action(zn_recycleResponseNetwork, "zn", desc="recycle memory request") {
     responseL2Network_in.recycle(clockEdge(), cyclesToTicks(recycle_latency));
   }
@@ -1011,6 +1077,39 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
   action(kd_wakeUpDependents, "kd", desc="wake-up dependents") {
     wakeUpBuffers(address);
   }
+
+  action(r_reserveBanksWrite, "rbw", desc="reserve banks on write with refresh consideration") {
+    if(dataBankCheckRefresh(curCycle())){
+      L2cache.recordRequestTypeSpecf(CacheRequestType:DataArrayWrite, address, data_write_latency + additionalDataRefreshLatency(curCycle()));
+    } else { L2cache.recordRequestTypeSpecf(CacheRequestType:DataArrayWrite, address, data_write_latency); }
+    if(dataBankCheckRefresh(curCycle())){
+    L2cache.recordRequestTypeSpecf(CacheRequestType:TagArrayWrite, address, tag_write_latency + additionalTagRefreshLatency(curCycle()));
+    } else { L2cache.recordRequestTypeSpecf(CacheRequestType:TagArrayWrite, address, tag_write_latency); }
+  }
+
+  action(r_reserveBanksWriteReplace, "rbwr", desc="reserve banks on write with refresh consideration") {
+    if(dataBankCheckRefresh(curCycle())){
+      L2cache.recordRequestTypeSpecf(CacheRequestType:DataArrayWrite, address, data_write_latency + additionalDataRefreshLatency(curCycle()));
+    } else { L2cache.recordRequestTypeSpecf(CacheRequestType:DataArrayWrite, address, data_write_latency); }
+  }
+
+  action(r_reserveBanksHit, "rbh", desc="reserve banks on hit with refresh consideration") {
+    if(dataBankCheckRefresh(curCycle())){
+      L2cache.recordRequestTypeSpecf(CacheRequestType:DataArrayRead, address, data_read_latency + additionalDataRefreshLatency(curCycle()));
+    } else { L2cache.recordRequestTypeSpecf(CacheRequestType:DataArrayRead, address, data_read_latency); }
+    if(dataBankCheckRefresh(curCycle())){
+    L2cache.recordRequestTypeSpecf(CacheRequestType:TagArrayRead, address, tag_read_latency + additionalTagRefreshLatency(curCycle()));
+    } else { L2cache.recordRequestTypeSpecf(CacheRequestType:TagArrayRead, address, tag_read_latency); }
+  }
+
+  action(r_reserveBanksMiss, "rbm", desc="reserve banks with refresh consideration") {
+    peek(L1RequestL2Network_in, RequestMsg) {
+      if(dataBankCheckRefresh(curCycle())){
+      L2cache.recordRequestTypeSpecf(CacheRequestType:TagArrayRead, in_msg.addr, tag_read_latency + additionalTagRefreshLatency(curCycle()));
+      } else { L2cache.recordRequestTypeSpecf(CacheRequestType:TagArrayRead, in_msg.addr, tag_read_latency); }
+    }
+  }
+
 
   //*****************************************************
   // TRANSITIONS
@@ -1022,12 +1121,12 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
 
   // Transitions from I (Idle)
   transition({NP, IS, ISS, IM, SS, M, M_I, I_I, S_I, MT_IB, MT_SB}, L1_PUTX) {
-    ti_sendWBAck;
+    t_sendWBAck;
     jj_popL1RequestQueue;
   }
 
   transition({NP, SS, M, MT, M_I, I_I, S_I, IS, ISS, IM, MT_IB, MT_SB}, L1_PUTX_old) {
-    ti_sendWBAck;
+    t_sendWBAck;
     jj_popL1RequestQueue;
   }
 
@@ -1056,6 +1155,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     i_allocateTBE;
     ss_recordGetSL1ID;
     a_issueFetchToMemory;
+    r_reserveBanksMiss;
     uu_profileMiss;
     jj_popL1RequestQueue;
   }
@@ -1067,6 +1167,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     i_allocateTBE;
     ss_recordGetSL1ID;
     a_issueFetchToMemory;
+    r_reserveBanksMiss;
     uu_profileMiss;
     jj_popL1RequestQueue;
   }
@@ -1078,6 +1179,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     i_allocateTBE;
     xx_recordGetXL1ID;
     a_issueFetchToMemory;
+    r_reserveBanksMiss;
     uu_profileMiss;
     jj_popL1RequestQueue;
   }
@@ -1086,16 +1188,16 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
   // transitions from IS/IM
 
   transition(ISS, Mem_Data, MT_MB) {
+    r_reserveBanksWrite;
     m_writeDataToCache;
-    uu_profileWrite;
     ex_sendExclusiveDataToGetSRequestors;
     s_deallocateTBE;
     o_popIncomingResponseQueue;
   }
 
   transition(IS, Mem_Data, SS) {
+    r_reserveBanksWrite;
     m_writeDataToCache;
-    uu_profileWrite;
     e_sendDataToGetSRequestors;
     s_deallocateTBE;
     o_popIncomingResponseQueue;
@@ -1103,16 +1205,29 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
   }
 
   transition(IM, Mem_Data, MT_MB) {
+    r_reserveBanksWrite;
     m_writeDataToCache;
-    uu_profileWrite;
     ee_sendDataToGetXRequestor;
     s_deallocateTBE;
     o_popIncomingResponseQueue;
   }
 
+  transition({IM, IS, ISS}, MEM_STALL_DATA){
+    zn_recycleResponseNetwork;
+  }
+
+  transition({MT_IB, MT_IIB}, L1_STALL_DATA){
+    zn_recycleResponseNetwork;
+  }
+
+  transition({SS, M, NP, IS, ISS, MT}, L1_STALL_DATA){
+    zr_recycleL1RequestQueue;
+  }
+
   transition({IS, ISS}, {L1_GETS, L1_GET_INSTR}, IS) {
     nn_addSharer;
     ss_recordGetSL1ID;
+    r_reserveBanksMiss;
     uu_profileMiss;
     jj_popL1RequestQueue;
   }
@@ -1130,6 +1245,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     ds_sendSharedDataToRequestor;
     nn_addSharer;
     set_setMRU;
+    r_reserveBanksHit;
     uu_profileHit;
     jj_popL1RequestQueue;
   }
@@ -1140,6 +1256,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     // fw_sendFwdInvToSharers;
     fwm_sendFwdInvToSharersMinusRequestor;
     set_setMRU;
+    r_reserveBanksHit;
     uu_profileHit;
     jj_popL1RequestQueue;
   }
@@ -1148,6 +1265,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     fwm_sendFwdInvToSharersMinusRequestor;
     ts_sendInvAckToUpgrader;
     set_setMRU;
+    r_reserveBanksHit;
     uu_profileHit;
     jj_popL1RequestQueue;
   }
@@ -1168,6 +1286,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
   transition(M, L1_GETX, MT_MB) {
     d_sendDataToRequestor;
     set_setMRU;
+    r_reserveBanksHit;
     uu_profileHit;
     jj_popL1RequestQueue;
   }
@@ -1176,6 +1295,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
     d_sendDataToRequestor;
     nn_addSharer;
     set_setMRU;
+    r_reserveBanksHit;
     uu_profileHit;
     jj_popL1RequestQueue;
   }
@@ -1183,6 +1303,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
   transition(M, L1_GETS, MT_MB) {
     dd_sendExclusiveDataToRequestor;
     set_setMRU;
+    r_reserveBanksHit;
     uu_profileHit;
     jj_popL1RequestQueue;
   }
@@ -1204,6 +1325,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
 
   transition(MT, L1_GETX, MT_MB) {
     b_forwardRequestToExclusive;
+    r_reserveBanksMiss;
     uu_profileMiss;
     set_setMRU;
     jj_popL1RequestQueue;
@@ -1212,6 +1334,7 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
 
   transition(MT, {L1_GETS, L1_GET_INSTR}, MT_IIB) {
     b_forwardRequestToExclusive;
+    r_reserveBanksMiss;
     uu_profileMiss;
     set_setMRU;
     jj_popL1RequestQueue;
@@ -1231,8 +1354,8 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
 
   transition(MT, L1_PUTX, M) {
     ll_clearSharers;
+    r_reserveBanksWrite;
     mr_writeDataToCacheFromRequest;
-    uu_profileWrite;
     t_sendWBAck;
     jj_popL1RequestQueue;
   }
@@ -1254,14 +1377,14 @@ machine(MachineType:L2Cache, "MERSI Directory L2 Cache CMP")
   }
 
   transition(MT_IIB, {WB_Data, WB_Data_clean}, MT_SB) {
+    r_reserveBanksWrite;
     m_writeDataToCache;
-    uu_profileWrite;
     o_popIncomingResponseQueue;
   }
 
   transition(MT_IB, {WB_Data, WB_Data_clean}, SS) {
+    r_reserveBanksWrite;
     m_writeDataToCache;
-    uu_profileWrite;
     o_popIncomingResponseQueue;
     kd_wakeUpDependents;
   }

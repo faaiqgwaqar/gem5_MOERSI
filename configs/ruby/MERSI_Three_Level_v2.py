@@ -71,6 +71,12 @@ def define_options(parser):
     parser.add_argument("--l0d_assoc", type=int, default=1)
     parser.add_argument("--l0_transitions_per_cycle", type=int, default=32)
     parser.add_argument("--l1_transitions_per_cycle", type=int, default=32)
+    parser.add_argument("--l2_data_miss_latency", type=int, default=2)
+    parser.add_argument("--l2_data_hit_latency", type=int, default=4)
+    parser.add_argument("--l2_data_write_latency", type=int, default=4)
+    parser.add_argument("--l2_refresh_period", type=int, default=90)
+    parser.add_argument("--l2_refresh_latency", type=int, default=10)
+    parser.add_argument("--l2_refresh_enabled", type=int, default=0)
     parser.add_argument("--l2_transitions_per_cycle", type=int, default=4)
     parser.add_argument(
         "--enable-prefetch",
@@ -84,9 +90,9 @@ def define_options(parser):
 def create_system(
     options, full_system, system, dma_ports, bootmem, ruby_system, cpus
 ):
-    if buildEnv["PROTOCOL"] != "MESI_Three_Level":
+    if buildEnv["PROTOCOL"] != "MERSI_Three_Level_v2":
         fatal(
-            "This script requires the MESI_Three_Level protocol to be\
+            "This script requires the MERSI_Three_Level_v2 protocol to be\
                built."
         )
 
@@ -128,9 +134,6 @@ def create_system(
                 is_icache=True,
                 start_index_bit=block_size_bits,
                 replacement_policy=LRURP(),
-                dataAccessLatency=5,
-                tagAccessLatency=5,
-                resourceStalls=True,
             )
 
             l0d_cache = L0Cache(
@@ -139,9 +142,6 @@ def create_system(
                 is_icache=False,
                 start_index_bit=block_size_bits,
                 replacement_policy=LRURP(),
-                dataAccessLatency=5,
-                tagAccessLatency=5,
-                resourceStalls=True,
             )
 
             clk_domain = cpus[i].clk_domain
@@ -182,9 +182,6 @@ def create_system(
                 assoc=options.l1d_assoc,
                 start_index_bit=block_size_bits,
                 is_icache=False,
-                dataAccessLatency=5,
-                tagAccessLatency=5,
-                resourceStalls=True,
             )
 
             l1_cntrl = L1Cache_Controller(
@@ -238,9 +235,9 @@ def create_system(
                 size=options.l2_size,
                 assoc=options.l2_assoc,
                 start_index_bit=l2_index_start,
-                dataAccessLatency=5,
-                tagAccessLatency=5,
                 resourceStalls=True,
+                dataArrayBanks=256,
+                tagArrayBanks=256,
             )
 
             l2_cntrl = L2Cache_Controller(
@@ -249,6 +246,14 @@ def create_system(
                 cluster_id=i,
                 transitions_per_cycle=options.l2_transitions_per_cycle,
                 ruby_system=ruby_system,
+                l2_data_miss_latency=options.l2_data_miss_latency,
+                l2_data_hit_latency=options.l2_data_hit_latency,
+                l2_data_write_latency=options.l2_data_write_latency,
+                l2_refresh_period=options.l2_refresh_period,
+                l2_refresh_latency=options.l2_refresh_latency,
+                l2_refresh_enabled=options.l2_refresh_enabled,
+                l2_refresh_total=options.l2_refresh_period
+                + options.l2_refresh_latency,
             )
 
             exec(

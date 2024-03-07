@@ -149,6 +149,10 @@ class CacheMemory : public SimObject
 
     bool checkResourceAvailable(CacheResourceType res, Addr addr);
     void recordRequestType(CacheRequestType requestType, Addr addr);
+    void recordRequestTypeSpecf(CacheRequestType requestType, Addr addr,
+      Cycles access_time);
+
+    int getRefreshStartPoint(CacheResourceType res, Addr addr);
 
     // hardware transactional memory
     void htmAbortTransaction();

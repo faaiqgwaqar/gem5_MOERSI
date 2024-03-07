@@ -35,6 +35,7 @@ config PROTOCOL
     default "MOESI_CMP_token" if RUBY_PROTOCOL_MOESI_CMP_TOKEN
     default "MOESI_hammer" if RUBY_PROTOCOL_MOESI_HAMMER
     default "MERSI_GT_Three_Level" if RUBY_PROTOCOL_MERSI_GT_THREE_LEVEL
+    default "MERSI_Three_Level_v2" if RUBY_PROTOCOL_MERSI_THREE_LEVEL_v2
     default "Garnet_standalone" if RUBY_PROTOCOL_GARNET_STANDALONE
 
 cont_choice "Ruby protocol"
@@ -51,6 +52,8 @@ cont_choice "Ruby protocol"
         bool "MESI three level"
     config RUBY_PROTOCOL_MERSI_GT_THREE_LEVEL
         bool "MERSI three level"
+    config RUBY_PROTOCOL_MERSI_THREE_LEVEL_v2
+        bool "MERSI three level v2"
     config RUBY_PROTOCOL_MESI_THREE_LEVEL_HTM
         bool "MESI three level HTM"
     config RUBY_PROTOCOL_MI_EXAMPLE

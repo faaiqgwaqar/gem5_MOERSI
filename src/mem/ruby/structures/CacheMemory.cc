@@ -665,10 +665,41 @@ CacheMemory::recordRequestType(CacheRequestType requestType, Addr addr)
     }
 }
 
+void
+CacheMemory::recordRequestTypeSpecf(CacheRequestType requestType, Addr addr,
+    Cycles access_time)
+{
+    DPRINTF(RubyStats, "Recorded statistic: %s\n",
+            CacheRequestType_to_string(requestType));
+    switch(requestType) {
+    case CacheRequestType_DataArrayRead:
+        dataArray.reserveSpecf(addressToCacheSet(addr), access_time);
+        cacheMemoryStats.numDataArrayReads++;
+        return;
+    case CacheRequestType_DataArrayWrite:
+        dataArray.reserveSpecf(addressToCacheSet(addr), access_time);
+        cacheMemoryStats.numDataArrayWrites++;
+        return;
+    case CacheRequestType_TagArrayRead:
+        tagArray.reserveSpecf(addressToCacheSet(addr), access_time);
+        cacheMemoryStats.numTagArrayReads++;
+        return;
+    case CacheRequestType_TagArrayWrite:
+        tagArray.reserveSpecf(addressToCacheSet(addr), access_time);
+        cacheMemoryStats.numTagArrayWrites++;
+        return;
+    default:
+        warn("CacheMemory access_type not found: %s",
+             CacheRequestType_to_string(requestType));
+    }
+}
+
 bool
 CacheMemory::checkResourceAvailable(CacheResourceType res, Addr addr)
 {
     if (!m_resource_stalls) {
+        DPRINTF(RubyResourceStalls,
+                    "No Stalls Projected\n");
         return true;
     }
 
@@ -702,6 +733,11 @@ CacheMemory::checkResourceAvailable(CacheResourceType res, Addr addr)
     } else {
         panic("Unrecognized cache resource type.");
     }
+}
+
+int
+CacheMemory::getRefreshStartPoint(CacheResourceType res, Addr addr){
+    return 0;
 }
 
 bool

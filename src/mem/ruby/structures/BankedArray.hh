@@ -76,6 +76,7 @@ class BankedArray
     bool tryAccess(int64_t idx);
 
     void reserve(int64_t idx);
+    void reserveSpecf(int64_t idx, Cycles access_time);
 
     Cycles getLatency() const { return accessLatency; }
 };

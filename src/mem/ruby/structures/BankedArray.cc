@@ -98,6 +98,32 @@ BankedArray::reserve(int64_t idx)
         (accessLatency-1) * m_ruby_system->clockPeriod();
 }
 
+void
+BankedArray::reserveSpecf(int64_t idx, Cycles access_time)
+{
+    if (access_time == 0)
+        return;
+
+    unsigned int bank = mapIndexToBank(idx);
+    assert(bank < banks);
+
+    if (busyBanks[bank].endAccess >= curTick()) {
+        if (busyBanks[bank].startAccess == curTick() &&
+             busyBanks[bank].idx == idx) {
+            // this is the same reservation (can happen when
+            // e.g., reserve the same resource for read and write)
+            return; // OK
+        } else {
+            panic("BankedArray reservation error");
+        }
+    }
+
+    busyBanks[bank].idx = idx;
+    busyBanks[bank].startAccess = curTick();
+    busyBanks[bank].endAccess = curTick() +
+        (access_time-1) * m_ruby_system->clockPeriod();
+}
+
 unsigned int
 BankedArray::mapIndexToBank(int64_t idx)
 {
